@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { List } from "@raycast/api";
+import { List, closeMainWindow, popToRoot } from "@raycast/api";
 import { useLocalStorage } from "@raycast/utils";
 
 import { STORAGE_KEY } from "./constants";
@@ -25,6 +25,8 @@ export default function Command(props: CommandProps) {
         setLaunched(true);
         try {
           await openSearch(query, match);
+          await popToRoot({ clearSearchBar: true });
+          await closeMainWindow();
         } catch (e) {
           setLaunched(false);
         }
