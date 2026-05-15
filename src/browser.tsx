@@ -24,6 +24,7 @@ type ProfileManagerProps = {
 
 type ProfileEditorProps = ProfileManagerProps & {
   profile?: BrowserProfile;
+  initialName?: string;
 };
 
 const STORAGE_KEY = "browser-profiles";
@@ -127,7 +128,7 @@ async function openSearch(query: string, profile?: BrowserProfile) {
 
 type CommandProps = LaunchProps<{ arguments: { query: string; profile?: string } }>;
 
-function ProfileEditor({ profile, profiles, setProfiles }: ProfileEditorProps) {
+function ProfileEditor({ profile, initialName, profiles, setProfiles }: ProfileEditorProps) {
   const isEditing = Boolean(profile);
   const defaultValue = profile?.isDefault ?? profiles.length === 0;
 
@@ -171,12 +172,17 @@ function ProfileEditor({ profile, profiles, setProfiles }: ProfileEditorProps) {
     <Form
       actions={
         <ActionPanel>
-          <Action.SubmitForm title={isEditing ? "Save Profile" : "Add Profile"} onSubmit={handleSubmit} />
+            <Action.SubmitForm title={isEditing ? "Save Profile" : "Add Profile"} onSubmit={handleSubmit} />
         </ActionPanel>
       }
     >
       <Form.Description text="Add a browser app name and the profile directory or profile name it uses. For Chrome and Edge, this is usually something like Default or Profile 1." />
-      <Form.TextField id="name" title="Profile Name" defaultValue={profile?.name ?? "Work"} placeholder="Work" />
+        <Form.TextField
+          id="name"
+          title="Profile Name"
+          defaultValue={profile?.name ?? initialName ?? "Work"}
+          placeholder="Work"
+        />
       <Form.TextField
         id="browserApp"
         title="Browser App"
@@ -373,9 +379,19 @@ function SearchResultList({ query, profileHint, profiles, setProfiles, isLoading
           {!showDefaultBrowserItem && filteredProfiles.length === 0 ? (
             <List.EmptyView
               title="No matching profile"
-              description="Change the profile argument or filter text, or create a new profile."
+              description={`No profile matches. Press Enter to create a new profile using that name.`}
               actions={
                 <ActionPanel>
+                  <Action.Push
+                    title={`Create Profile "${profileFilter}"`}
+                    target={
+                      <ProfileEditor
+                        initialName={profileFilter}
+                        profiles={profiles}
+                        setProfiles={setProfiles}
+                      />
+                    }
+                  />
                   <Action.Push
                     title="Manage Profiles"
                     target={<ProfileManager profiles={profiles} setProfiles={setProfiles} />}
