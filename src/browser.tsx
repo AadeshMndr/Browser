@@ -1,5 +1,6 @@
 import { Action, ActionPanel, Form, LaunchProps, List, Toast, open, showToast } from "@raycast/api";
 import { runAppleScript, showFailureToast, useLocalStorage } from "@raycast/utils";
+import { useMemo, useState } from "react";
 
 type BrowserProfile = {
   id: string;
@@ -26,8 +27,44 @@ type ProfileEditorProps = ProfileManagerProps & {
 };
 
 const STORAGE_KEY = "browser-profiles";
+const DEFAULT_BROWSER_ITEM_ID = "default-browser";
+
 function makeProfileId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function normalize(text: string) {
+  return text.trim().toLowerCase();
+}
+
+function matchesProfileHint(profile: BrowserProfile, normalizedHint: string) {
+  if (!normalizedHint) {
+    return true;
+  }
+
+  return [profile.name, profile.browserApp, profile.profileDirectory]
+    .map((value) => normalize(value))
+    .some((value) => value.includes(normalizedHint));
+}
+
+function findProfileByHint(profiles: BrowserProfile[], hint: string) {
+  const normalizedHint = normalize(hint);
+
+  if (!normalizedHint) {
+    return undefined;
+  }
+
+  const exactMatch = profiles.find((profile) =>
+    [profile.name, profile.browserApp, profile.profileDirectory]
+      .map((value) => normalize(value))
+      .some((value) => value === normalizedHint),
+  );
+
+  if (exactMatch) {
+    return exactMatch;
+  }
+
+  return profiles.find((profile) => matchesProfileHint(profile, normalizedHint));
 }
 
 function sortProfiles(profiles: BrowserProfile[]) {
@@ -88,7 +125,7 @@ async function openSearch(query: string, profile?: BrowserProfile) {
   });
 }
 
-type CommandProps = LaunchProps<{ arguments: { query: string } }>;
+type CommandProps = LaunchProps<{ arguments: { query: string; profile?: string } }>;
 
 function ProfileEditor({ profile, profiles, setProfiles }: ProfileEditorProps) {
   const isEditing = Boolean(profile);
@@ -220,9 +257,31 @@ function ProfileManager({ profiles, setProfiles }: ProfileManagerProps) {
 type SearchResultListProps = ProfileManagerProps & {
   isLoading: boolean;
   query: string;
+  profileHint: string;
 };
 
-function SearchResultList({ query, profiles, setProfiles, isLoading }: SearchResultListProps) {
+function SearchResultList({ query, profileHint, profiles, setProfiles, isLoading }: SearchResultListProps) {
+  const [profileFilter, setProfileFilter] = useState(profileHint);
+
+  const sortedProfiles = useMemo(() => sortProfiles(profiles), [profiles]);
+  const profileFromArgument = useMemo(
+    () => findProfileByHint(sortedProfiles, profileHint),
+    [sortedProfiles, profileHint],
+  );
+
+  const filteredProfiles = useMemo(() => {
+    const normalizedFilter = normalize(profileFilter);
+
+    if (!normalizedFilter) {
+      return sortedProfiles;
+    }
+
+    return sortedProfiles.filter((profile) => matchesProfileHint(profile, normalizedFilter));
+  }, [sortedProfiles, profileFilter]);
+
+  const normalizedFilter = normalize(profileFilter);
+  const showDefaultBrowserItem = !normalizedFilter || "default browser".includes(normalizedFilter);
+
   async function makeDefaultProfile(profile: BrowserProfile) {
     await setProfiles(setDefaultProfile(sortProfiles(upsertProfile(profiles, profile)), profile.id));
   }
@@ -243,10 +302,17 @@ function SearchResultList({ query, profiles, setProfiles, isLoading }: SearchRes
     }
   }
 
-  const sortedProfiles = sortProfiles(profiles);
-
   return (
-    <List isLoading={isLoading} searchBarPlaceholder="Choose a browser profile">
+    <List
+      isLoading={isLoading}
+      filtering={false}
+      searchBarPlaceholder="Filter profiles like a dropdown"
+      searchText={profileFilter}
+      onSearchTextChange={setProfileFilter}
+      selectedItemId={
+        profileFromArgument?.id ?? (showDefaultBrowserItem ? DEFAULT_BROWSER_ITEM_ID : filteredProfiles[0]?.id)
+      }
+    >
       {query.length === 0 ? (
         <List.EmptyView
           title="Type your search query when launching Browser"
@@ -263,24 +329,29 @@ function SearchResultList({ query, profiles, setProfiles, isLoading }: SearchRes
       ) : (
         <>
           <List.Section title={`Search for ${query}`}>
-            <List.Item
-              title="Default browser"
-              subtitle={buildSearchUrl(query)}
-              actions={
-                <ActionPanel>
-                  <Action title="Search" onAction={() => launchSearch()} />
-                  <Action.Push
-                    title="Manage Profiles"
-                    target={<ProfileManager profiles={profiles} setProfiles={setProfiles} />}
-                  />
-                </ActionPanel>
-              }
-            />
-            {sortedProfiles.map((profile) => (
+            {showDefaultBrowserItem ? (
+              <List.Item
+                id={DEFAULT_BROWSER_ITEM_ID}
+                title="Default browser"
+                subtitle={buildSearchUrl(query)}
+                actions={
+                  <ActionPanel>
+                    <Action title="Search" onAction={() => launchSearch()} />
+                    <Action.Push
+                      title="Manage Profiles"
+                      target={<ProfileManager profiles={profiles} setProfiles={setProfiles} />}
+                    />
+                  </ActionPanel>
+                }
+              />
+            ) : null}
+            {filteredProfiles.map((profile) => (
               <List.Item
                 key={profile.id}
+                id={profile.id}
                 title={profile.name}
                 subtitle={`${profile.browserApp} · ${profile.profileDirectory}${profile.isDefault ? " · Default" : ""}`}
+                accessories={profileFromArgument?.id === profile.id ? [{ tag: { value: "From argument" } }] : undefined}
                 actions={
                   <ActionPanel>
                     <Action title="Search" onAction={() => launchSearch(profile)} />
@@ -299,6 +370,20 @@ function SearchResultList({ query, profiles, setProfiles, isLoading }: SearchRes
               />
             ))}
           </List.Section>
+          {!showDefaultBrowserItem && filteredProfiles.length === 0 ? (
+            <List.EmptyView
+              title="No matching profile"
+              description="Change the profile argument or filter text, or create a new profile."
+              actions={
+                <ActionPanel>
+                  <Action.Push
+                    title="Manage Profiles"
+                    target={<ProfileManager profiles={profiles} setProfiles={setProfiles} />}
+                  />
+                </ActionPanel>
+              }
+            />
+          ) : null}
         </>
       )}
     </List>
@@ -307,10 +392,12 @@ function SearchResultList({ query, profiles, setProfiles, isLoading }: SearchRes
 
 export default function Command(props: CommandProps) {
   const { value: profiles = [], setValue: setProfiles, isLoading } = useLocalStorage<BrowserProfile[]>(STORAGE_KEY, []);
+  const profileHint = props.arguments.profile?.trim() ?? "";
 
   return (
     <SearchResultList
       query={props.arguments.query.trim()}
+      profileHint={profileHint}
       profiles={profiles}
       setProfiles={setProfiles}
       isLoading={isLoading}

@@ -24,6 +24,12 @@
           "type": "text",
           "placeholder": "Search the web",
           "required": true
+        },
+        {
+          "name": "profile",
+          "type": "text",
+          "placeholder": "Profile name (optional)",
+          "required": false
         }
       ],
       "mode": "view"
